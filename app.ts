@@ -1,11 +1,12 @@
-// HTTP wiring: git smart HTTP at /{owner}/{repo}.git, REST v3 under /api/v3.
-// GraphQL (/api/graphql) and MCP (/mcp) are session B's surface; until then they
-// answer the same JSON 404 as any unknown route. See INTERFACE.md.
+// HTTP wiring: git smart HTTP at /{owner}/{repo}.git, REST v3 under /api/v3,
+// GraphQL v4 at /api/graphql and MCP at /mcp. See INTERFACE.md.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { Store, MAX_BODY_BYTES } from './store.ts';
 import { handleGit, type GitRequest } from './git.ts';
 import { handleRest } from './rest.ts';
+import { handleGraphQL } from './graphql.ts';
+import { handleMcp } from './mcp.ts';
 
 const JSON_TYPE = 'application/json; charset=utf-8';
 
@@ -103,6 +104,22 @@ export function createApp(): Server {
           body,
         });
         res.writeHead(result.status, { 'content-type': result.contentType, 'content-length': result.body.length });
+        res.end(result.body);
+        return;
+      }
+
+      // GraphQL v4: one operation or a batch, same store and token rule.
+      if (method === 'POST' && path === '/api/graphql') {
+        const result = handleGraphQL(store, token, { headers, body });
+        res.writeHead(result.status, { 'content-type': JSON_TYPE, 'content-length': Buffer.byteLength(result.body) });
+        res.end(result.body);
+        return;
+      }
+
+      // MCP: JSON-RPC 2.0 Streamable HTTP (plain JSON answers).
+      if (path === '/mcp' && (method === 'POST' || method === 'DELETE')) {
+        const result = handleMcp(store, token, { method, headers, body });
+        res.writeHead(result.status, { 'content-type': result.contentType, 'content-length': Buffer.byteLength(result.body) });
         res.end(result.body);
         return;
       }
